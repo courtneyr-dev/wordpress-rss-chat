@@ -84,6 +84,18 @@ class Backfeed {
 	 * @return void
 	 */
 	public function run() {
+		/**
+		 * Filters whether the reply importer runs at all.
+		 *
+		 * A routing or bridge plugin that delivers replies another way (for
+		 * example as verified Webmentions) can switch the importer off here
+		 * so the same reply is never stored twice.
+		 *
+		 * @param bool $enabled Whether backfeed runs.
+		 */
+		if ( ! \apply_filters( 'rss_chat_backfeed_enabled', true ) ) {
+			return;
+		}
 		if ( ! Plugin::is_connected() ) {
 			return;
 		}

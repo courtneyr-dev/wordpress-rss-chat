@@ -269,4 +269,113 @@ class Test_Syndication extends TestCase {
 
 		$this->assertCount( 0, $this->newposts, 'loop guard: imported comments must not push' );
 	}
+
+	/**
+	 * A password-protected chat post is not pushed.
+	 */
+	public function test_password_protected_post_is_not_pushed() {
+		$post_id = self::factory()->post->create(
+			array(
+				'post_status'   => 'publish',
+				'post_password' => 'hunter2',
+			)
+		);
+		\set_post_format( $post_id, 'chat' );
+		\wp_update_post( array( 'ID' => $post_id ) );
+
+		$this->assertCount( 0, $this->newposts );
+	}
+
+	/**
+	 * The pushed item carries the post's canonical permalink.
+	 */
+	public function test_pushed_item_carries_the_permalink() {
+		$post_id = $this->create_chat_post();
+
+		$this->assertCount( 1, $this->newposts );
+		$payload = $this->payload( $this->newposts[0] );
+		$this->assertSame( \get_permalink( $post_id ), $payload['link'] ?? null );
+	}
+
+	/**
+	 * The rss_chat_post_item filter can alter the payload.
+	 */
+	public function test_post_item_filter_can_alter_the_payload() {
+		\add_filter(
+			'rss_chat_post_item',
+			function ( $item ) {
+				$item['title'] = 'Filtered title';
+				return $item;
+			}
+		);
+
+		$this->create_chat_post();
+
+		\remove_all_filters( 'rss_chat_post_item' );
+
+		$payload = $this->payload( $this->newposts[0] );
+		$this->assertSame( 'Filtered title', $payload['title'] ?? null );
+	}
+
+	/**
+	 * A webmention-typed comment is not pushed as a reply.
+	 */
+	public function test_webmention_typed_comment_is_not_pushed() {
+		$post_id        = $this->create_chat_post();
+		$this->newposts = array();
+
+		\wp_insert_comment(
+			array(
+				'comment_post_ID'  => $post_id,
+				'comment_content'  => 'Inbound.',
+				'comment_approved' => 1,
+				'comment_type'     => 'webmention',
+			)
+		);
+
+		$this->assertCount( 0, $this->newposts );
+	}
+
+	/**
+	 * A comment carrying another network's protocol meta is not pushed.
+	 */
+	public function test_foreign_protocol_comment_is_not_pushed() {
+		$post_id        = $this->create_chat_post();
+		$this->newposts = array();
+
+		\wp_insert_comment(
+			array(
+				'comment_post_ID'  => $post_id,
+				'comment_content'  => 'Inbound.',
+				'comment_approved' => 1,
+				'comment_type'     => 'comment',
+				'comment_meta'     => array( 'protocol' => 'webmention' ),
+			)
+		);
+
+		$this->assertCount( 0, $this->newposts );
+	}
+
+	/**
+	 * The rss_chat_should_push_comment filter can hold a local comment back.
+	 */
+	public function test_should_push_comment_filter_can_opt_out() {
+		$post_id        = $this->create_chat_post();
+		$this->newposts = array();
+
+		\add_filter( 'rss_chat_should_push_comment', '__return_false' );
+
+		\wp_insert_comment(
+			array(
+				'comment_post_ID'  => $post_id,
+				'comment_content'  => 'Local.',
+				'comment_approved' => 1,
+				'comment_type'     => 'comment',
+			)
+		);
+
+		\remove_filter( 'rss_chat_should_push_comment', '__return_false' );
+
+		$this->assertCount( 0, $this->newposts );
+	}
 }

@@ -113,6 +113,9 @@ class Syndication {
 		if ( 'post' !== $post->post_type || 'publish' !== $post->post_status ) {
 			return;
 		}
+		if ( '' !== $post->post_password ) {
+			return;
+		}
 		/**
 		 * Filters whether a post is pushed to rss.chat.
 		 *
@@ -132,12 +135,24 @@ class Syndication {
 
 		$item = array(
 			'description' => \apply_filters( 'the_content', $post->post_content ),
+			// The canonical WordPress permalink. The server stores it on the
+			// item and feeds emit it, which is what lets a reply's Webmention
+			// find its way back to this post.
+			'link'        => \get_permalink( $post ),
 		);
 
 		$title = \get_the_title( $post );
 		if ( '' !== $title ) {
 			$item['title'] = $title;
 		}
+
+		/**
+		 * Filters the item payload sent to rss.chat's /newpost.
+		 *
+		 * @param array    $item The item payload.
+		 * @param \WP_Post $post The post being pushed.
+		 */
+		$item = \apply_filters( 'rss_chat_post_item', $item, $post );
 
 		$result = ( new API() )->new_post( $item );
 		if ( \is_wp_error( $result ) ) {
@@ -165,6 +180,26 @@ class Syndication {
 			return;
 		}
 		if ( 1 !== (int) $comment->comment_approved ) {
+			return;
+		}
+		// Only locally-written comments leave the site. Comments that arrived
+		// FROM another network — a Webmention, an ActivityPub reply, a
+		// pingback — carry a non-comment type or a `protocol` meta value, and
+		// re-broadcasting them would echo the same event across networks.
+		if ( 'comment' !== $comment->comment_type && '' !== $comment->comment_type ) {
+			return;
+		}
+		if ( '' !== (string) \get_comment_meta( $comment_id, Plugin::META_PROTOCOL, true ) ) {
+			return;
+		}
+
+		/**
+		 * Filters whether a comment is pushed to rss.chat as a reply.
+		 *
+		 * @param bool         $push    Whether to push this comment.
+		 * @param \WP_Comment $comment The comment.
+		 */
+		if ( ! \apply_filters( 'rss_chat_should_push_comment', true, $comment ) ) {
 			return;
 		}
 		if ( '' !== (string) \get_comment_meta( $comment_id, Plugin::META_GUID, true ) ) {
