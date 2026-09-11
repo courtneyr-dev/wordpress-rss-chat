@@ -68,7 +68,7 @@ The revision, post type and post status guards still apply (password-protected p
 Three more hooks round out the surface:
 
 - `rss_chat_post_item` filters the item payload before it goes to `/newpost`. The payload now carries the post's canonical permalink as `link`, which servers store and feed out — it's what lets a reply on the network point back at the WordPress post.
-- `rss_chat_should_push_comment` filters whether a comment is pushed as a reply. Comments that arrived from another network (a Webmention, an ActivityPub reply, a pingback — anything with a non-comment type or a `protocol` meta value) are never pushed, so bridged networks can't echo the same event back and forth.
+- `rss_chat_should_push_comment` filters whether a comment is pushed as a reply. Only comments written by a logged-in user of the site are pushed at all. Comments that arrived from another network (a Webmention, an ActivityPub reply, a pingback: anything with a non-comment type or a `protocol` meta value) and comments from the public form without a user never leave the site, so bridged networks can't echo the same event back and forth and nothing goes out under the site owner's name that they didn't write. A reply to a comment that was not pushed stays home too. The filter runs last, so it only sees comments that would otherwise go out.
 - `rss_chat_backfeed_enabled` switches the reply importer off, for sites that receive replies another way and must not store them twice.
 
 ### Does this store a copy of the network in WordPress?

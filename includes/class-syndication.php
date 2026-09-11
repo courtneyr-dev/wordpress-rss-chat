@@ -135,11 +135,15 @@ class Syndication {
 
 		$item = array(
 			'description' => \apply_filters( 'the_content', $post->post_content ),
-			// The canonical WordPress permalink. The server stores it on the
-			// item and feeds emit it, which is what lets a reply's Webmention
-			// find its way back to this post.
-			'link'        => \get_permalink( $post ),
 		);
+
+		// The canonical WordPress permalink. The server stores it on the
+		// item and feeds emit it, which is what lets a reply's Webmention
+		// find its way back to this post.
+		$permalink = \get_permalink( $post );
+		if ( \is_string( $permalink ) && '' !== $permalink ) {
+			$item['link'] = $permalink;
+		}
 
 		$title = \get_the_title( $post );
 		if ( '' !== $title ) {
@@ -152,7 +156,7 @@ class Syndication {
 		 * @param array    $item The item payload.
 		 * @param \WP_Post $post The post being pushed.
 		 */
-		$item = \apply_filters( 'rss_chat_post_item', $item, $post );
+		$item = (array) \apply_filters( 'rss_chat_post_item', $item, $post );
 
 		$result = ( new API() )->new_post( $item );
 		if ( \is_wp_error( $result ) ) {
@@ -182,24 +186,19 @@ class Syndication {
 		if ( 1 !== (int) $comment->comment_approved ) {
 			return;
 		}
-		// Only locally-written comments leave the site. Comments that arrived
-		// FROM another network — a Webmention, an ActivityPub reply, a
-		// pingback — carry a non-comment type or a `protocol` meta value, and
-		// re-broadcasting them would echo the same event across networks.
-		if ( 'comment' !== $comment->comment_type && '' !== $comment->comment_type ) {
+		// Only comments written by a WordPress user on this site leave it.
+		// Comments that arrived FROM another network (a Webmention, an
+		// ActivityPub reply, a pingback) carry a non-comment type or a
+		// `protocol` meta value; re-broadcasting them would echo the same
+		// event across networks. A comment from the public form with nobody
+		// logged in has no user either, so it stays home as well.
+		if ( 'comment' !== $comment->comment_type ) {
 			return;
 		}
 		if ( '' !== (string) \get_comment_meta( $comment_id, Plugin::META_PROTOCOL, true ) ) {
 			return;
 		}
-
-		/**
-		 * Filters whether a comment is pushed to rss.chat as a reply.
-		 *
-		 * @param bool         $push    Whether to push this comment.
-		 * @param \WP_Comment $comment The comment.
-		 */
-		if ( ! \apply_filters( 'rss_chat_should_push_comment', true, $comment ) ) {
+		if ( 0 === (int) $comment->user_id ) {
 			return;
 		}
 		if ( '' !== (string) \get_comment_meta( $comment_id, Plugin::META_GUID, true ) ) {
@@ -211,6 +210,20 @@ class Syndication {
 
 		$parent_id = $this->resolve_reply_target( $comment );
 		if ( 0 === $parent_id ) {
+			return;
+		}
+
+		/**
+		 * Filters whether a comment is pushed to rss.chat as a reply.
+		 *
+		 * Runs last, so it only ever sees comments that would otherwise be
+		 * pushed: approved, written by a user of this site, not yet on
+		 * rss.chat, and with something on rss.chat to reply to.
+		 *
+		 * @param bool         $push    Whether to push this comment.
+		 * @param \WP_Comment $comment The comment.
+		 */
+		if ( ! \apply_filters( 'rss_chat_should_push_comment', true, $comment ) ) {
 			return;
 		}
 
@@ -237,17 +250,18 @@ class Syndication {
 
 	/**
 	 * Find the rss.chat id this comment is replying to: the parent comment's
-	 * synced id if it has one, otherwise the post's synced id.
+	 * synced id for a reply, the post's synced id for a top-level comment.
+	 *
+	 * A reply to a comment that never went to rss.chat gets 0, not the post:
+	 * sent as a top-level reply it would answer something that is not on the
+	 * network, which is only confusing without the context.
 	 *
 	 * @param \WP_Comment $comment The comment.
 	 * @return int rss.chat id, or 0 if none applies.
 	 */
 	private function resolve_reply_target( $comment ) {
 		if ( (int) $comment->comment_parent > 0 ) {
-			$parent = (int) \get_comment_meta( $comment->comment_parent, Plugin::META_ID, true );
-			if ( $parent > 0 ) {
-				return $parent;
-			}
+			return (int) \get_comment_meta( $comment->comment_parent, Plugin::META_ID, true );
 		}
 
 		return (int) \get_post_meta( $comment->comment_post_ID, Plugin::META_ID, true );

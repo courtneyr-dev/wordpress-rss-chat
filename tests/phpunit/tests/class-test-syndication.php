@@ -197,6 +197,7 @@ class Test_Syndication extends TestCase {
 				'comment_post_ID'  => $post_id,
 				'comment_content'  => 'nice one',
 				'comment_approved' => 1,
+				'user_id'          => self::factory()->user->create(),
 			)
 		);
 
@@ -329,6 +330,7 @@ class Test_Syndication extends TestCase {
 				'comment_post_ID'  => $post_id,
 				'comment_content'  => 'Inbound.',
 				'comment_approved' => 1,
+				'user_id'          => self::factory()->user->create(),
 				'comment_type'     => 'webmention',
 			)
 		);
@@ -348,6 +350,7 @@ class Test_Syndication extends TestCase {
 				'comment_post_ID'  => $post_id,
 				'comment_content'  => 'Inbound.',
 				'comment_approved' => 1,
+				'user_id'          => self::factory()->user->create(),
 				'comment_type'     => 'comment',
 				'comment_meta'     => array( 'protocol' => 'webmention' ),
 			)
@@ -370,12 +373,164 @@ class Test_Syndication extends TestCase {
 				'comment_post_ID'  => $post_id,
 				'comment_content'  => 'Local.',
 				'comment_approved' => 1,
+				'user_id'          => self::factory()->user->create(),
 				'comment_type'     => 'comment',
 			)
 		);
 
 		\remove_filter( 'rss_chat_should_push_comment', '__return_false' );
 
+		$this->assertCount( 0, $this->newposts );
+	}
+
+	/**
+	 * A filter that returns something other than an array must not kill the
+	 * publish request (API::new_post() has an array type hint).
+	 */
+	public function test_post_item_filter_returning_a_non_array_does_not_fatal() {
+		\add_filter( 'rss_chat_post_item', '__return_null' );
+
+		$this->create_chat_post();
+
+		\remove_filter( 'rss_chat_post_item', '__return_null' );
+
+		$this->assertCount( 1, $this->newposts );
+	}
+
+	/**
+	 * When get_permalink() has nothing to offer, no `link` is sent at all
+	 * rather than `link: false`.
+	 */
+	public function test_missing_permalink_is_not_sent_as_link() {
+		\add_filter( 'post_link', '__return_false' );
+
+		$this->create_chat_post();
+
+		\remove_filter( 'post_link', '__return_false' );
+
+		$this->assertCount( 1, $this->newposts );
+		$payload = $this->payload( $this->newposts[0] );
+		$this->assertArrayNotHasKey( 'link', $payload );
+	}
+
+	/**
+	 * A comment from the public comment form (no WordPress user) stays home.
+	 */
+	public function test_comment_without_a_user_is_not_pushed() {
+		$post_id        = $this->create_chat_post();
+		$this->newposts = array();
+
+		\wp_insert_comment(
+			array(
+				'comment_post_ID'  => $post_id,
+				'comment_content'  => 'Anonymous.',
+				'comment_approved' => 1,
+				'comment_type'     => 'comment',
+				'user_id'          => 0,
+			)
+		);
+
+		$this->assertCount( 0, $this->newposts );
+	}
+
+	/**
+	 * A reply to a comment that was never pushed stays home too, instead of
+	 * going out as a top-level reply to the post.
+	 */
+	public function test_reply_to_an_unpushed_comment_is_not_pushed() {
+		$post_id = $this->create_chat_post();
+		$user_id = self::factory()->user->create();
+
+		// A parent that never made it to rss.chat: no synced id on it.
+		$parent_id = \wp_insert_comment(
+			array(
+				'comment_post_ID'  => $post_id,
+				'comment_content'  => 'Never left the site.',
+				'comment_approved' => 1,
+				'comment_type'     => 'comment',
+				'user_id'          => 0,
+			)
+		);
+		\delete_comment_meta( $parent_id, Plugin::META_ID );
+		$this->newposts = array();
+
+		\wp_insert_comment(
+			array(
+				'comment_post_ID'  => $post_id,
+				'comment_parent'   => $parent_id,
+				'comment_content'  => 'Replying to the one that stayed.',
+				'comment_approved' => 1,
+				'comment_type'     => 'comment',
+				'user_id'          => $user_id,
+			)
+		);
+
+		$this->assertCount( 0, $this->newposts );
+	}
+
+	/**
+	 * A reply to a pushed comment still goes out, threaded under it.
+	 */
+	public function test_reply_to_a_pushed_comment_is_threaded_under_it() {
+		$post_id = $this->create_chat_post();
+		$user_id = self::factory()->user->create();
+
+		$parent_id = \wp_insert_comment(
+			array(
+				'comment_post_ID'  => $post_id,
+				'comment_content'  => 'Parent.',
+				'comment_approved' => 1,
+				'comment_type'     => 'comment',
+				'user_id'          => $user_id,
+			)
+		);
+		\update_comment_meta( $parent_id, Plugin::META_ID, 555 );
+		$this->newposts = array();
+
+		\wp_insert_comment(
+			array(
+				'comment_post_ID'  => $post_id,
+				'comment_parent'   => $parent_id,
+				'comment_content'  => 'Child.',
+				'comment_approved' => 1,
+				'comment_type'     => 'comment',
+				'user_id'          => $user_id,
+			)
+		);
+
+		$this->assertCount( 1, $this->newposts );
+		$payload = $this->payload( $this->newposts[0] );
+		$this->assertSame( 555, (int) $payload['inReplyTo'] );
+	}
+
+	/**
+	 * The rss_chat_should_push_comment filter only runs for comments that
+	 * could actually be pushed: a comment on a post that is not on rss.chat
+	 * never reaches it.
+	 */
+	public function test_should_push_comment_filter_is_not_called_without_a_reply_target() {
+		$post_id = self::factory()->post->create( array( 'post_status' => 'publish' ) );
+
+		$called  = false;
+		$capture = function ( $push ) use ( &$called ) {
+			$called = true;
+			return $push;
+		};
+		\add_filter( 'rss_chat_should_push_comment', $capture );
+
+		\wp_insert_comment(
+			array(
+				'comment_post_ID'  => $post_id,
+				'comment_content'  => 'Local.',
+				'comment_approved' => 1,
+				'comment_type'     => 'comment',
+				'user_id'          => self::factory()->user->create(),
+			)
+		);
+
+		\remove_filter( 'rss_chat_should_push_comment', $capture );
+
+		$this->assertFalse( $called );
 		$this->assertCount( 0, $this->newposts );
 	}
 }
