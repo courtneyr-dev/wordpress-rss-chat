@@ -115,6 +115,7 @@ class Backfeed {
 			if ( $rss_id <= 0 ) {
 				continue;
 			}
+
 			$this->import_replies( $post_id, $rss_id );
 		}
 	}
@@ -136,10 +137,12 @@ class Backfeed {
 			if ( ! \is_array( $item ) || empty( $item['guid'] ) ) {
 				continue;
 			}
+
 			// The array leads with the post itself; skip it.
 			if ( isset( $item['id'] ) && (int) $item['id'] === $rss_id ) {
 				continue;
 			}
+
 			// The guid dedup below is the only loop guard we need: a reply that
 			// WordPress pushed already carries its guid on a comment, so it is
 			// skipped here. Replies the owner wrote directly on rss.chat, even
@@ -222,6 +225,7 @@ class Backfeed {
 
 		\update_comment_meta( $comment_id, Plugin::META_PROTOCOL, Plugin::PROTOCOL );
 		\update_comment_meta( $comment_id, Plugin::META_GUID, $item['guid'] );
+
 		if ( isset( $item['id'] ) ) {
 			\update_comment_meta( $comment_id, Plugin::META_ID, (int) $item['id'] );
 		}
