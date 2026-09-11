@@ -107,15 +107,19 @@ class Syndication {
 		if ( ! $post instanceof \WP_Post ) {
 			return;
 		}
+
 		if ( \wp_is_post_revision( $post->ID ) || \wp_is_post_autosave( $post->ID ) ) {
 			return;
 		}
+
 		if ( 'post' !== $post->post_type || 'publish' !== $post->post_status ) {
 			return;
 		}
+
 		if ( '' !== $post->post_password ) {
 			return;
 		}
+
 		/**
 		 * Filters whether a post is pushed to rss.chat.
 		 *
@@ -125,9 +129,11 @@ class Syndication {
 		if ( ! \apply_filters( 'rss_chat_should_syndicate', 'chat' === \get_post_format( $post ), $post ) ) {
 			return;
 		}
+
 		if ( ! Plugin::is_connected() ) {
 			return;
 		}
+
 		// Already synced: don't create a duplicate.
 		if ( '' !== (string) \get_post_meta( $post->ID, Plugin::META_ID, true ) ) {
 			return;
@@ -183,9 +189,11 @@ class Syndication {
 		if ( Backfeed::$importing ) {
 			return;
 		}
+
 		if ( 1 !== (int) $comment->comment_approved ) {
 			return;
 		}
+
 		// Only comments written by a WordPress user on this site leave it.
 		// Comments that arrived FROM another network (a Webmention, an
 		// ActivityPub reply, a pingback) carry a non-comment type or a
@@ -195,15 +203,19 @@ class Syndication {
 		if ( 'comment' !== $comment->comment_type ) {
 			return;
 		}
+
 		if ( '' !== (string) \get_comment_meta( $comment_id, Plugin::META_PROTOCOL, true ) ) {
 			return;
 		}
+
 		if ( 0 === (int) $comment->user_id ) {
 			return;
 		}
+
 		if ( '' !== (string) \get_comment_meta( $comment_id, Plugin::META_GUID, true ) ) {
 			return;
 		}
+
 		if ( ! Plugin::is_connected() ) {
 			return;
 		}
@@ -281,6 +293,7 @@ class Syndication {
 		if ( isset( $result['id'] ) ) {
 			$store( Plugin::META_ID, (int) $result['id'] );
 		}
+
 		if ( isset( $result['guid'] ) ) {
 			$store( Plugin::META_GUID, $result['guid'] );
 		}
