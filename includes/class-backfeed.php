@@ -96,6 +96,7 @@ class Backfeed {
 		if ( ! \apply_filters( 'rss_chat_backfeed_enabled', true ) ) {
 			return;
 		}
+
 		if ( ! Plugin::is_connected() ) {
 			return;
 		}
